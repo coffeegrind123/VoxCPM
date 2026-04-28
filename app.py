@@ -1,10 +1,13 @@
 import os
 import re
 import sys
+import glob
 import logging
+import time
 import numpy as np
 import torch
 import gradio as gr
+import soundfile as sf
 from typing import Optional, Tuple
 from funasr import AutoModel
 from pathlib import Path
@@ -231,9 +234,18 @@ class VoxCPMDemo:
             log_level="DEBUG",
             device="cuda:0" if self.device == "cuda" else "cpu",
         )
+        # Warm up ASR
+        asr_cache = os.environ.get("MODELSCOPE_CACHE", os.path.expanduser("~/.cache/modelscope"))
+        asr_example = Path(asr_cache) / "models" / "iic" / "SenseVoiceSmall" / "example" / "en.mp3"
+        if asr_example.exists():
+            logger.info("Warming up ASR model...")
+            self.asr_model.generate(input=str(asr_example), language="auto", use_itn=True)
+            logger.info("ASR warmup complete.")
 
         self.voxcpm_model: Optional[voxcpm.VoxCPM] = None
         self._model_id = model_id
+        logger.info(f"Warming up VoxCPM model ({model_id})...")
+        self.get_or_load_voxcpm()
 
     def get_or_load_voxcpm(self) -> voxcpm.VoxCPM:
         if self.voxcpm_model is not None:
@@ -348,7 +360,23 @@ def create_demo_interface(demo: VoxCPMDemo):
             denoise=denoise,
             inference_timesteps=int(dit_steps),
         )
-        return (sr, wav_np)
+
+        # Persist to /app/outputs/ with rotation (keep last 10)
+        out_dir = Path("/app/outputs")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        ts = int(time.time() * 1000)
+        out_path = out_dir / f"gen_{ts}.wav"
+        sf.write(str(out_path), wav_np, sr)
+
+        # Rotate: keep only the 10 most recent
+        existing = sorted(glob.glob(str(out_dir / "gen_*.wav")))
+        for old in existing[:-10]:
+            try:
+                os.unlink(old)
+            except OSError:
+                pass
+
+        return str(out_path)
 
     def _on_toggle_instant(checked):
         """Instant UI toggle — no ASR, no blocking."""
@@ -497,6 +525,7 @@ def run_demo(
         i18n=I18N,
         theme=_APP_THEME,
         css=_CUSTOM_CSS,
+        allowed_paths=["/app/outputs"],
     )
 
 

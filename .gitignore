@@ -4,3 +4,10 @@ voxcpm.egg-info
 .DS_Store
 ./pretrained_models/
 app_local.py
+.cache/
+.venv-mcp/
+outputs/
+.mcp.json
+mcp_server.py
+mcp-requirements.txt
+run-mcp.sh
